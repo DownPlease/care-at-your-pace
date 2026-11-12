@@ -1,0 +1,31 @@
+# Обновляет блок «Из Telegram-канала» на главной по публичной ленте t.me/s/psyalina.
+# Раз в час, после каждого push в main (если вручную выложили старый блок — он сразу поправится)
+# и вручную (Actions → Channel posts → Run workflow). Коммитит только если что-то изменилось.
+name: Channel posts
+on:
+  schedule:
+    - cron: "17 * * * *"
+  push:
+    branches: [main]
+    paths-ignore: [".github/**"]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: channel-posts
+  cancel-in-progress: false
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 .github/scripts/channel_posts.py
+      - name: Commit
+        run: |
+          git diff --quiet index.html && { echo "Изменений нет"; exit 0; }
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Канал: новые посты на главной (автоматически)" index.html
+          git pull --rebase -q origin main
+          git push origin HEAD:main
