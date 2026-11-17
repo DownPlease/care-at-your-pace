@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Copies approved reviews from the old chatgpt.site service into YDB (idempotent via fixed request_id per created_at).
 set -euo pipefail
-curl -sS -m 30 https://care-at-your-pace-reviews.ivangnevashev777.chatgpt.site/api/reviews > /tmp/old.json
+curl -sSfL "https://raw.githubusercontent.com/DownPlease/care-at-your-pace/${SHA:?}/old.json" > /tmp/old.json
 python3 - > /tmp/migrate.yql <<'PY'
 import json,uuid
 d=json.load(open('/tmp/old.json'))['reviews']
