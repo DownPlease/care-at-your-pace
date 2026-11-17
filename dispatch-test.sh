@@ -8,7 +8,12 @@ C=$(yc ydb database get reviews --format json | jq -r .endpoint); yc iam create-
   -s "SELECT request_id,name,text FROM reviews WHERE status='approved'u AND name='Надежда'u LIMIT 1;" > /tmp/r.json
 python3 - <<'PY'
 import json,urllib.request
-r=json.loads(open('/tmp/r.json').read().strip().splitlines()[0])
+d=open('/tmp/r.json').read().strip()
+try:
+    r=json.loads(d)
+except ValueError:
+    r=json.loads(d.splitlines()[0])
+if isinstance(r,list): r=r[0]
 body=json.dumps({"name":r["name"],"text":r["text"],"consent":True,"request_id":r["request_id"]}).encode()
 req=urllib.request.Request("https://d5ddnu89r04bngjmeai1.emzafcgx.apigw.yandexcloud.net/api/reviews",data=body,method="POST",
   headers={"Origin":"https://care-at-your-pace.com","Content-Type":"text/plain;charset=UTF-8"})
