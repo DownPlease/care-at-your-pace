@@ -340,7 +340,8 @@ var iamToken = null;
 async function getDriver() {
   if (driver && driverToken === iamToken) return driver;
   const old = driver;
-  driver = new Driver({ connectionString: process.env.YDB_CONNECTION_STRING, authService: new TokenAuthService(iamToken) });
+  const [endpoint, database] = process.env.YDB_CONNECTION_STRING.split("/?database=");
+  driver = new Driver({ endpoint, database, authService: new TokenAuthService(iamToken) });
   driverToken = iamToken;
   if (old) old.destroy().catch(() => {
   });
