@@ -30,7 +30,7 @@ yc serverless function version create --function-name reviews-api --runtime node
   --environment "YDB_CONNECTION_STRING=$CONN" --environment "SERVICE_ORIGIN=https://$DOMAIN" \
   --environment "MODERATION_SECRET=$MS" --environment "OUTBOX_SECRET=$OS" --environment TG_DIRECT=0 \
   --environment TG_BOT_TOKEN=relay --environment '"TG_REVIEW_CHATS=488588060,376181827"' ${GH:+--environment "GH_DISPATCH_TOKEN=$GH"} >/dev/null
-echo "GH_DISPATCH_TOKEN: ${GH:+set}${GH:-not set}" | sed 's/not set.*/not set/'
+if [ -n "$GH" ]; then echo "GH_DISPATCH_TOKEN: set"; else echo "GH_DISPATCH_TOKEN: not set"; fi
 echo "FUNCTION=$FID SA=$SA"
 echo "API=https://$DOMAIN"
 curl -s "https://$DOMAIN/health"; echo
