@@ -1,0 +1,26 @@
+# Пересылает уведомления о новых отзывах в Telegram.
+# Сервис отзывов работает в Yandex Cloud, откуда api.telegram.org недоступен, поэтому
+# сообщения забирает этот workflow (раз в 5 минут) и отправляет через бота.
+# Секреты репозитория: TG_BOT_TOKEN, REVIEWS_OUTBOX_SECRET.
+name: Reviews relay
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: reviews-relay
+  cancel-in-progress: false
+jobs:
+  relay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/scripts
+      - run: python3 .github/scripts/reviews_relay.py
+        env:
+          REVIEWS_API: https://d5ddnu89r04bngjmeai1.emzafcgx.apigw.yandexcloud.net
+          REVIEWS_OUTBOX_SECRET: ${{ secrets.REVIEWS_OUTBOX_SECRET }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}

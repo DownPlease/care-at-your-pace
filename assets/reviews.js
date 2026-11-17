@@ -1,6 +1,6 @@
 (() => {
   const api = window.REVIEWS_API || (['127.0.0.1','localhost'].includes(location.hostname)
-    ? '' : 'https://care-at-your-pace-reviews.ivangnevashev777.chatgpt.site');
+    ? '' : 'https://d5ddnu89r04bngjmeai1.emzafcgx.apigw.yandexcloud.net');
   const list = document.querySelector('[data-reviews-list]');
   const state = document.querySelector('[data-reviews-state]');
   const format = new Intl.DateTimeFormat('ru-RU', {day: 'numeric', month: 'long', year: 'numeric'});
