@@ -240,8 +240,8 @@ async function route(request, env, ctx) {
 var worker_default = { async fetch(request, env, ctx) {
   try {
     return await route(request, env, ctx);
-  } catch {
-    console.error("Review service request failed");
+  } catch (error) {
+    console.error("Review service request failed", String(error?.message || error).slice(0, 500));
     return json({ error: "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0432\u044B\u043F\u043E\u043B\u043D\u0438\u0442\u044C \u0437\u0430\u043F\u0440\u043E\u0441. \u041F\u043E\u043F\u0440\u043E\u0431\u0443\u0439\u0442\u0435 \u043F\u043E\u0437\u0436\u0435." }, 503, ALLOWED.has(request.headers.get("Origin")) ? { "Access-Control-Allow-Origin": request.headers.get("Origin"), "Vary": "Origin" } : {});
   }
 } };
