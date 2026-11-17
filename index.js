@@ -134,8 +134,24 @@ async function telegram(env, chat, review) {
   if (!response.ok || !result.ok) throw new Error("Telegram delivery failed");
   return String(result.result.message_id);
 }
+async function dispatchRelay(env) {
+  try {
+    const response = await fetch("https://api.github.com/repos/DownPlease/care-at-your-pace/actions/workflows/reviews-relay.yml/dispatches", {
+      method: "POST",
+      signal: AbortSignal.timeout(5e3),
+      headers: { "Authorization": "Bearer " + env.GH_DISPATCH_TOKEN, "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "care-at-your-pace-reviews", "Content-Type": "application/json" },
+      body: JSON.stringify({ ref: "main" })
+    });
+    if (response.status !== 204) console.warn("Relay dispatch failed", response.status);
+  } catch {
+    console.warn("Relay dispatch failed");
+  }
+}
 async function flush(env, reviewId = null) {
-  if (env.TG_DIRECT === "0") return;
+  if (env.TG_DIRECT === "0") {
+    if (reviewId && env.GH_DISPATCH_TOKEN) await dispatchRelay(env);
+    return;
+  }
   const now = Math.floor(Date.now() / 1e3);
   const sql = "SELECT d.review_id,d.chat_id,r.name,r.text,r.created_at,r.id FROM deliveries d JOIN reviews r ON r.id=d.review_id WHERE d.sent_at IS NULL AND d.claimed_until < ?" + (reviewId ? " AND d.review_id=?" : "") + " ORDER BY r.created_at LIMIT 4";
   const rows2 = await env.DB.prepare(sql).bind(...reviewId ? [now, reviewId] : [now]).all();
@@ -349,7 +365,7 @@ async function getDriver() {
   return driver;
 }
 var DB = createD1(getDriver);
-var ENV_KEYS = ["SERVICE_ORIGIN", "MODERATION_SECRET", "TG_BOT_TOKEN", "TG_REVIEW_CHATS", "TG_DIRECT", "TG_TIMEOUT_MS", "OUTBOX_SECRET"];
+var ENV_KEYS = ["SERVICE_ORIGIN", "MODERATION_SECRET", "TG_BOT_TOKEN", "TG_REVIEW_CHATS", "TG_DIRECT", "TG_TIMEOUT_MS", "OUTBOX_SECRET", "GH_DISPATCH_TOKEN"];
 function toRequest(event, origin) {
   let path = event.url || event.path || "/";
   if (path.includes("{")) {
