@@ -9,7 +9,8 @@ API = os.environ["REVIEWS_API"].rstrip("/")
 SECRET = os.environ.get("REVIEWS_OUTBOX_SECRET", "")
 TOKEN = os.environ.get("TG_BOT_TOKEN", "")
 if not SECRET or not TOKEN:
-    sys.exit("Нет секретов REVIEWS_OUTBOX_SECRET / TG_BOT_TOKEN")
+    print("Нет секретов REVIEWS_OUTBOX_SECRET / TG_BOT_TOKEN — пропуск")
+    sys.exit(0)
 
 def post(url, data=None, auth=True):
     headers = {"Content-Type": "application/json"}
