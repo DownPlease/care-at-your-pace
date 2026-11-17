@@ -1,0 +1,3 @@
+CREATE TABLE reviews (id Utf8 NOT NULL, request_id Utf8, name Utf8, text Utf8, created_at Utf8, status Utf8, consent_at Utf8, moderated_at Utf8, version Int64, PRIMARY KEY (id));
+CREATE TABLE deliveries (review_id Utf8 NOT NULL, chat_id Utf8 NOT NULL, sent_at Utf8, message_id Utf8, claimed_until Int64, PRIMARY KEY (review_id, chat_id));
+CREATE TABLE rate_limits (`key` Utf8 NOT NULL, `count` Int64, expires_at Int64, PRIMARY KEY (`key`));

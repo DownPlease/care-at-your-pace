@@ -1,0 +1,7 @@
+{
+ "name": "care-at-your-pace-reviews-yc",
+ "private": true,
+ "dependencies": {
+  "ydb-sdk": "5.11.1"
+ }
+}
