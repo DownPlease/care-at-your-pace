@@ -42,7 +42,7 @@
     button.disabled = true; status.textContent = 'Отправляем отзыв…';
     try {
       const response = await fetch(api + '/api/reviews', {
-        method: 'POST', headers: {'Content-Type': 'application/json'}, signal: AbortSignal.timeout(15000),
+        method: 'POST', headers: {'Content-Type': 'text/plain;charset=UTF-8'}, signal: AbortSignal.timeout(25000),
         body: JSON.stringify({name: String(fields.get('name')).trim(), text, consent: fields.get('consent') === 'on', website: fields.get('website'), request_id: requestId})
       });
       const result = await response.json();
