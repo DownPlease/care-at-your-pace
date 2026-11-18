@@ -16,9 +16,11 @@ cat > /tmp/policy.json <<P
  {"Effect":"Allow","Principal":{"CanonicalUser":"aje6cht7mm3sml6mtk8s"},"Action":"*","Resource":["arn:aws:s3:::$B","arn:aws:s3:::$B/*"]}]}
 P
 yc storage bucket update --name $B --policy-from-file /tmp/policy.json >/dev/null
+# Without public read the anonymous Allow in the policy is ignored; the policy limits it to public/*.
+yc storage bucket update --name $B --public-read >/dev/null
 yc storage bucket update --name $B --cors 'allowed-methods=[method-get,method-head,method-post],allowed-origins=[https://care-at-your-pace.com,https://www.care-at-your-pace.com],allowed-headers=[*],max-age-seconds=3600' >/dev/null
 echo "bucket ok"
-touch ~/.reviews-secrets; chmod 600 ~/.reviews-secrets
+touch ~/.reviews-secrets
 if ! grep -q '^S3K=' ~/.reviews-secrets; then
   K=$(yc iam access-key create --service-account-id "$SA" --description reviews-upload-policy --format json)
   printf 'S3K=%s\nS3S=%s\n' "$(jq -r .access_key.key_id <<<"$K")" "$(jq -r .secret <<<"$K")" >> ~/.reviews-secrets
