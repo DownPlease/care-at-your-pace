@@ -29,12 +29,15 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 // yc/handler.js
 var handler_exports = {};
 __export(handler_exports, {
+  acknowledge: () => acknowledge,
   handler: () => handler,
   ingest: () => ingest,
+  moderate: () => moderate,
   publish: () => publish,
   respond: () => respond,
   run: () => run,
-  toRequest: () => toRequest
+  toRequest: () => toRequest,
+  writeOutbox: () => writeOutbox
 });
 module.exports = __toCommonJS(handler_exports);
 var import_ydb_sdk2 = __toESM(require("ydb-sdk"), 1);
@@ -122,7 +125,7 @@ async function limit(env, request) {
 }
 async function telegramMessage(env, chat, review) {
   const token = await moderationToken(env, review);
-  const url = env.SERVICE_ORIGIN + "/moderate/#" + token;
+  const url = (env.MODERATION_URL || env.SERVICE_ORIGIN + "/moderate/") + "#" + token;
   const message = "\u041D\u043E\u0432\u044B\u0439 \u043E\u0442\u0437\u044B\u0432 \u043D\u0430 care-at-your-pace.com\n\n" + review.name + "\n\n" + review.text.slice(0, 3200) + (review.text.length > 3200 ? "\n\n\u041F\u043E\u043B\u043D\u044B\u0439 \u0442\u0435\u043A\u0441\u0442 \u2014 \u043F\u043E \u043A\u043D\u043E\u043F\u043A\u0435 \u043D\u0438\u0436\u0435." : "") + "\n\n\u041E\u0442\u0437\u044B\u0432 \u043F\u043E\u043A\u0430 \u043D\u0435 \u043E\u043F\u0443\u0431\u043B\u0438\u043A\u043E\u0432\u0430\u043D.";
   return { chat_id: chat, text: message, link_preview_options: { is_disabled: true }, reply_markup: { inline_keyboard: [[{ text: "\u041F\u0440\u043E\u0432\u0435\u0440\u0438\u0442\u044C \u0438 \u043E\u043F\u0443\u0431\u043B\u0438\u043A\u043E\u0432\u0430\u0442\u044C \u043E\u0442\u0437\u044B\u0432", url }]] } };
 }
@@ -353,6 +356,7 @@ function createD1(getDriver2) {
 
 // yc/storage.js
 var import_node_crypto = require("node:crypto");
+var import_node_crypto2 = require("node:crypto");
 var S3 = "https://storage.yandexcloud.net";
 var enc = (key2) => key2.split("/").map(encodeURIComponent).join("/");
 function bucket(env, token) {
@@ -396,8 +400,32 @@ function uploadPolicy(env, now = /* @__PURE__ */ new Date()) {
   const key2 = hmac(hmac(hmac(hmac("AWS4" + env.S3_KEY_SECRET, day), region), "s3"), "aws4_request");
   return { url: S3 + "/" + env.BUCKET, expires, fields: { "x-amz-algorithm": "AWS4-HMAC-SHA256", "x-amz-credential": credential, "x-amz-date": date, policy, "x-amz-signature": (0, import_node_crypto.createHmac)("sha256", key2).update(policy).digest("hex") } };
 }
+var PUBLIC_BASE = S3 + "/care-at-your-pace-reviews/public/";
+var outboxKey = (env) => "public/outbox-" + (0, import_node_crypto2.createHash)("sha256").update("outbox:" + env.OUTBOX_SECRET).digest("hex").slice(0, 40) + ".json";
+var MODERATE_HTML = `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><meta name="referrer" content="no-referrer"><title>\u041F\u0440\u043E\u0432\u0435\u0440\u043A\u0430 \u043E\u0442\u0437\u044B\u0432\u0430</title>
+<style>body{font:17px/1.5 system-ui,sans-serif;max-width:560px;margin:40px auto;padding:0 18px;color:#222}button{font:inherit;padding:12px 18px;margin:6px 8px 6px 0;border-radius:10px;border:1px solid #888;background:#fff;cursor:pointer}button.ok{background:#2f6f4f;color:#fff;border-color:#2f6f4f}button:disabled{opacity:.5}#s{margin-top:18px;font-weight:600}</style></head><body>
+<h1>\u041E\u0442\u0437\u044B\u0432 \u043D\u0430 care-at-your-pace.com</h1><p>\u0422\u0435\u043A\u0441\u0442 \u043E\u0442\u0437\u044B\u0432\u0430 \u2014 \u0432 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0438 Telegram, \u0438\u0437 \u043A\u043E\u0442\u043E\u0440\u043E\u0433\u043E \u0432\u044B \u043E\u0442\u043A\u0440\u044B\u043B\u0438 \u044D\u0442\u0443 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0443.</p>
+<div id="b"><button class="ok" data-s="approved">\u041E\u043F\u0443\u0431\u043B\u0438\u043A\u043E\u0432\u0430\u0442\u044C</button><button data-s="rejected">\u041E\u0442\u043A\u043B\u043E\u043D\u0438\u0442\u044C</button><button data-s="pending">\u0421\u043D\u044F\u0442\u044C \u0441 \u043F\u0443\u0431\u043B\u0438\u043A\u0430\u0446\u0438\u0438</button></div><p id="s"></p>
+<script>
+const token=decodeURIComponent(location.hash.slice(1)),st=document.getElementById('s'),btns=[...document.querySelectorAll('button')];
+const names={approved:'\u043E\u043F\u0443\u0431\u043B\u0438\u043A\u043E\u0432\u0430\u0442\u044C',rejected:'\u043E\u0442\u043A\u043B\u043E\u043D\u0438\u0442\u044C',pending:'\u0441\u043D\u044F\u0442\u044C \u0441 \u043F\u0443\u0431\u043B\u0438\u043A\u0430\u0446\u0438\u0438 (\u0432\u0435\u0440\u043D\u0443\u0442\u044C \u043D\u0430 \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0443)'};
+if(!/^[a-f0-9-]{36}\\.\\d+\\.[a-f0-9]{64}$/.test(token)){st.textContent='\u0421\u0441\u044B\u043B\u043A\u0430 \u043F\u043E\u0432\u0440\u0435\u0436\u0434\u0435\u043D\u0430. \u041E\u0442\u043A\u0440\u043E\u0439\u0442\u0435 \u0435\u0451 \u0437\u0430\u043D\u043E\u0432\u043E \u0438\u0437 Telegram.';btns.forEach(b=>b.disabled=true);}
+btns.forEach(b=>b.onclick=async()=>{
+  const status=b.dataset.s;if(!confirm('\u0422\u043E\u0447\u043D\u043E '+names[status]+' \u043E\u0442\u0437\u044B\u0432?'))return;
+  btns.forEach(x=>x.disabled=true);st.textContent='\u041E\u0442\u043F\u0440\u0430\u0432\u043B\u044F\u0435\u043C \u0440\u0435\u0448\u0435\u043D\u0438\u0435\u2026';
+  try{
+    const up=await (await fetch('upload.json',{cache:'no-cache'})).json(),f=new FormData();
+    f.append('key','inbox/mod-'+crypto.randomUUID()+'.json');f.append('Content-Type','application/json');
+    for(const [k,v] of Object.entries(up.fields))f.append(k,v);
+    f.append('file',new Blob([JSON.stringify({moderate:{token,status}})],{type:'application/json'}),'d.json');
+    const r=await fetch(up.url,{method:'POST',body:f});if(!r.ok)throw new Error('HTTP '+r.status);
+    st.textContent=status==='approved'?'\u0413\u043E\u0442\u043E\u0432\u043E. \u041E\u0442\u0437\u044B\u0432 \u043F\u043E\u044F\u0432\u0438\u0442\u0441\u044F \u043D\u0430 \u0441\u0430\u0439\u0442\u0435 \u0432 \u0442\u0435\u0447\u0435\u043D\u0438\u0435 \u043C\u0438\u043D\u0443\u0442\u044B.':'\u0413\u043E\u0442\u043E\u0432\u043E. \u0420\u0435\u0448\u0435\u043D\u0438\u0435 \u0441\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u043E.';
+  }catch(e){st.textContent='\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043E\u0442\u043F\u0440\u0430\u0432\u0438\u0442\u044C \u0440\u0435\u0448\u0435\u043D\u0438\u0435. \u041F\u0440\u043E\u0432\u0435\u0440\u044C\u0442\u0435 \u0438\u043D\u0442\u0435\u0440\u043D\u0435\u0442 \u0438 \u043F\u043E\u043F\u0440\u043E\u0431\u0443\u0439\u0442\u0435 \u0435\u0449\u0451 \u0440\u0430\u0437.';btns.forEach(x=>x.disabled=false);}
+});
+</script></body></html>`;
 
 // yc/handler.js
+var import_node_crypto3 = require("node:crypto");
 var { Driver, TokenAuthService } = import_ydb_sdk2.default;
 var driver = null;
 var driverToken = null;
@@ -451,6 +479,7 @@ async function respond(response) {
 function environment() {
   const env = { DB };
   for (const k of ENV_KEYS) if (process.env[k] != null) env[k] = process.env[k];
+  if (env.BUCKET) env.MODERATION_URL = PUBLIC_BASE + "moderate.html";
   return env;
 }
 async function run(request, env) {
@@ -464,6 +493,7 @@ async function publish(env, store) {
   const data = await (await run(new Request((env.SERVICE_ORIGIN || "https://localhost") + "/api/reviews"), env)).json();
   if (!Array.isArray(data.reviews)) throw new Error("reviews export failed");
   await store.put("public/reviews.json", JSON.stringify({ reviews: data.reviews, updated_at: (/* @__PURE__ */ new Date()).toISOString() }), "application/json; charset=utf-8", "public, max-age=30");
+  await store.put("public/moderate.html", MODERATE_HTML, "text/html; charset=utf-8", "no-cache");
   if (env.S3_KEY_ID && env.S3_KEY_SECRET) await store.put("public/upload.json", JSON.stringify(uploadPolicy(env)), "application/json; charset=utf-8", "no-cache");
 }
 async function ingest(env, store, key2) {
@@ -472,6 +502,21 @@ async function ingest(env, store, key2) {
     return "skipped";
   }
   const text = await store.get(key2);
+  let data = null;
+  try {
+    data = JSON.parse(text);
+  } catch {
+  }
+  if (data && data.outbox_ack) {
+    const r = await acknowledge(env, data);
+    await store.del(key2);
+    return r;
+  }
+  if (data && data.moderate) {
+    const r = await moderate(env, data.moderate);
+    await store.del(key2);
+    return r;
+  }
   const response = await run(new Request((env.SERVICE_ORIGIN || "https://localhost") + "/api/reviews", {
     method: "POST",
     body: text,
@@ -480,6 +525,35 @@ async function ingest(env, store, key2) {
   if (response.status >= 500) throw new Error("ingest " + response.status);
   await store.del(key2);
   return response.status;
+}
+var same = (a, b) => {
+  a = Buffer.from(String(a || ""));
+  b = Buffer.from(String(b || ""));
+  return a.length === b.length && a.length >= 32 && (0, import_node_crypto3.timingSafeEqual)(a, b);
+};
+async function acknowledge(env, data) {
+  if (!same(data.secret, env.OUTBOX_SECRET) || !Array.isArray(data.outbox_ack)) return "ack-denied";
+  for (const a of data.outbox_ack.slice(0, 50)) {
+    if (typeof a?.review_id !== "string" || typeof a?.chat_id !== "string" || !/^\d+$/.test(String(a.message_id))) continue;
+    await env.DB.prepare("UPDATE deliveries SET sent_at=?,message_id=? WHERE review_id=? AND chat_id=?").bind((/* @__PURE__ */ new Date()).toISOString(), String(a.message_id), a.review_id, a.chat_id).run();
+  }
+  return "ack";
+}
+async function moderate(env, m) {
+  const id = String(m?.token || "").split(".")[0];
+  if (!["approved", "rejected", "pending"].includes(m?.status) || !await authorize(env, m.token, id)) return "mod-denied";
+  const review = await env.DB.prepare("SELECT id,name,text,created_at,status,version FROM reviews WHERE id=?").bind(id).first();
+  if (!review) return "mod-missing";
+  if (review.status === m.status) return "mod-same";
+  await env.DB.prepare("UPDATE reviews SET status=?,moderated_at=?,version=version+1 WHERE id=? AND version=?").bind(m.status, (/* @__PURE__ */ new Date()).toISOString(), id, Number(review.version)).run();
+  return "mod-" + m.status;
+}
+async function writeOutbox(env, store) {
+  if (!env.OUTBOX_SECRET) return;
+  const rows2 = await env.DB.prepare("SELECT d.review_id,d.chat_id,r.name,r.text,r.created_at,r.id FROM deliveries d JOIN reviews r ON r.id=d.review_id WHERE d.sent_at IS NULL AND d.claimed_until < ? ORDER BY r.created_at LIMIT 4").bind(Math.floor(Date.now() / 1e3) + 1).all();
+  const messages = [];
+  for (const row of rows2.results) messages.push({ review_id: row.id, chat_id: row.chat_id, message: await telegramMessage(env, row.chat_id, row) });
+  await store.put(outboxKey(env), JSON.stringify({ messages, updated_at: (/* @__PURE__ */ new Date()).toISOString() }), "application/json; charset=utf-8", "no-store");
 }
 async function onMessages(messages, env) {
   if (!env.BUCKET) return { statusCode: 200, body: "no bucket" };
@@ -492,14 +566,18 @@ async function onMessages(messages, env) {
     if (type.includes("Timer")) timer = true;
   }
   if (timer) for (const k of await store.list("inbox/")) keys.add(k);
+  let republish = timer;
   for (const k of keys) {
     try {
-      console.log("inbox", k, await ingest(env, store, k));
+      const r = await ingest(env, store, k);
+      console.log("inbox", k, r);
+      if (String(r).startsWith("mod-")) republish = true;
     } catch (e) {
       console.error("inbox failed", k, String(e?.message || e).slice(0, 300));
     }
   }
-  if (timer) await publish(env, store);
+  if (republish) await publish(env, store).catch((e) => console.error("publish failed", String(e?.message || e).slice(0, 300)));
+  if (keys.size || timer) await writeOutbox(env, store).catch((e) => console.error("outbox failed", String(e?.message || e).slice(0, 300)));
   return { statusCode: 200, body: "ok" };
 }
 async function handler(event, context) {
@@ -514,10 +592,13 @@ async function handler(event, context) {
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
+  acknowledge,
   handler,
   ingest,
+  moderate,
   publish,
   respond,
   run,
-  toRequest
+  toRequest,
+  writeOutbox
 });
