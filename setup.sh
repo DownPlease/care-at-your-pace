@@ -2,7 +2,7 @@
 # Run in Yandex Cloud Shell. Creates SA, YDB serverless DB + tables, function, API Gateway.
 set -euo pipefail
 F=$(yc config get folder-id 2>/dev/null || true); F=${F:-b1g4rj04meutic27jaog}
-RAW=https://raw.githubusercontent.com/DownPlease/care-at-your-pace/reviews-backend
+RAW=https://raw.githubusercontent.com/DownPlease/care-at-your-pace/${REV:-reviews-backend}
 mkdir -p ~/fn && cd ~/fn
 for f in index.js package.json schema.yql gateway.yaml; do curl -sSfL "$RAW/$f?$(date +%s)" -o $f; done
 yc iam service-account get reviews-fn >/dev/null 2>&1 || yc iam service-account create --name reviews-fn >/dev/null
@@ -29,7 +29,8 @@ yc serverless function version create --function-name reviews-api --runtime node
   --memory 256m --execution-timeout 15s --source-path src --service-account-id "$SA" \
   --environment "YDB_CONNECTION_STRING=$CONN" --environment "SERVICE_ORIGIN=https://$DOMAIN" \
   --environment "MODERATION_SECRET=$MS" --environment "OUTBOX_SECRET=$OS" --environment TG_DIRECT=0 \
-  --environment TG_BOT_TOKEN=relay --environment '"TG_REVIEW_CHATS=488588060,376181827"' ${GH:+--environment "GH_DISPATCH_TOKEN=$GH"} >/dev/null
+  --environment TG_BOT_TOKEN=relay --environment '"TG_REVIEW_CHATS=488588060,376181827"' ${GH:+--environment "GH_DISPATCH_TOKEN=$GH"} \
+  ${S3K:+--environment BUCKET=care-at-your-pace-reviews --environment "S3_KEY_ID=$S3K" --environment "S3_KEY_SECRET=$S3S"} >/dev/null
 if [ -n "$GH" ]; then echo "GH_DISPATCH_TOKEN: set"; else echo "GH_DISPATCH_TOKEN: not set"; fi
 echo "FUNCTION=$FID SA=$SA"
 echo "API=https://$DOMAIN"

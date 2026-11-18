@@ -30,7 +30,10 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 var handler_exports = {};
 __export(handler_exports, {
   handler: () => handler,
+  ingest: () => ingest,
+  publish: () => publish,
   respond: () => respond,
+  run: () => run,
   toRequest: () => toRequest
 });
 module.exports = __toCommonJS(handler_exports);
@@ -348,6 +351,52 @@ function createD1(getDriver2) {
   }, _build: build };
 }
 
+// yc/storage.js
+var import_node_crypto = require("node:crypto");
+var S3 = "https://storage.yandexcloud.net";
+var enc = (key2) => key2.split("/").map(encodeURIComponent).join("/");
+function bucket(env, token) {
+  const base = S3 + "/" + env.BUCKET + "/";
+  const auth = { "X-YaCloud-SubjectToken": token };
+  const check = async (r, what) => {
+    if (!r.ok) throw new Error(what + " " + r.status + " " + (await r.text()).slice(0, 200));
+    return r;
+  };
+  return {
+    async get(key2) {
+      return (await check(await fetch(base + enc(key2), { headers: auth }), "get")).text();
+    },
+    async put(key2, body2, type, cache) {
+      await check(await fetch(base + enc(key2), { method: "PUT", body: body2, headers: { ...auth, "Content-Type": type, "Cache-Control": cache } }), "put");
+    },
+    async del(key2) {
+      const r = await fetch(base + enc(key2), { method: "DELETE", headers: auth });
+      if (!r.ok && r.status !== 404) await check(r, "delete");
+    },
+    async list(prefix) {
+      const xml = await (await check(await fetch(S3 + "/" + env.BUCKET + "?list-type=2&max-keys=50&prefix=" + encodeURIComponent(prefix), { headers: auth }), "list")).text();
+      return [...xml.matchAll(/<Key>([^<]+)<\/Key>/g)].map((m) => m[1].replace(/&amp;/g, "&"));
+    }
+  };
+}
+var hmac = (k, v) => (0, import_node_crypto.createHmac)("sha256", k).update(v).digest();
+function uploadPolicy(env, now = /* @__PURE__ */ new Date()) {
+  const date = now.toISOString().replace(/[-:]/g, "").replace(/\.\d+/, ""), day = date.slice(0, 8), region = "ru-central1";
+  const credential = env.S3_KEY_ID + "/" + day + "/" + region + "/s3/aws4_request";
+  const expires = new Date(now.getTime() + 2 * 864e5).toISOString();
+  const policy = Buffer.from(JSON.stringify({ expiration: expires, conditions: [
+    { bucket: env.BUCKET },
+    ["starts-with", "$key", "inbox/"],
+    ["starts-with", "$Content-Type", ""],
+    ["content-length-range", 20, 32e3],
+    { "x-amz-algorithm": "AWS4-HMAC-SHA256" },
+    { "x-amz-credential": credential },
+    { "x-amz-date": date }
+  ] })).toString("base64");
+  const key2 = hmac(hmac(hmac(hmac("AWS4" + env.S3_KEY_SECRET, day), region), "s3"), "aws4_request");
+  return { url: S3 + "/" + env.BUCKET, expires, fields: { "x-amz-algorithm": "AWS4-HMAC-SHA256", "x-amz-credential": credential, "x-amz-date": date, policy, "x-amz-signature": (0, import_node_crypto.createHmac)("sha256", key2).update(policy).digest("hex") } };
+}
+
 // yc/handler.js
 var { Driver, TokenAuthService } = import_ydb_sdk2.default;
 var driver = null;
@@ -365,15 +414,21 @@ async function getDriver() {
   return driver;
 }
 var DB = createD1(getDriver);
-var ENV_KEYS = ["SERVICE_ORIGIN", "MODERATION_SECRET", "TG_BOT_TOKEN", "TG_REVIEW_CHATS", "TG_DIRECT", "TG_TIMEOUT_MS", "OUTBOX_SECRET", "GH_DISPATCH_TOKEN"];
+var ENV_KEYS = ["SERVICE_ORIGIN", "MODERATION_SECRET", "TG_BOT_TOKEN", "TG_REVIEW_CHATS", "TG_DIRECT", "TG_TIMEOUT_MS", "OUTBOX_SECRET", "GH_DISPATCH_TOKEN", "BUCKET", "S3_KEY_ID", "S3_KEY_SECRET"];
 function toRequest(event, origin) {
   let path = event.url || event.path || "/";
   if (path.includes("{")) {
     const p = event.pathParams || event.pathParameters || {};
     path = "/" + (p.proxy || "");
   }
-  const url = new URL(path, origin);
-  if (!event.url && event.queryStringParameters) for (const [k, v] of Object.entries(event.queryStringParameters)) url.searchParams.set(k, v);
+  const q2 = { ...event.queryStringParameters || {} };
+  const direct = !event.url && typeof q2._p === "string" && /^\/(?!\/)[a-z0-9/_-]*$/i.test(q2._p);
+  if (direct) {
+    path = q2._p;
+    delete q2._p;
+  }
+  const url = new URL(path || "/", origin);
+  if (!event.url) for (const [k, v] of Object.entries(q2)) url.searchParams.set(k, v);
   const headers = new Headers();
   for (const [k, v] of Object.entries(event.headers || {})) if (!/^(cf-connecting-ip|host|content-length)$/i.test(k)) headers.set(k, v);
   const ip = event.requestContext?.identity?.sourceIp;
@@ -393,19 +448,76 @@ async function respond(response) {
   });
   return { statusCode: response.status, headers, body: await response.text(), isBase64Encoded: false };
 }
-async function handler(event, context) {
-  iamToken = context?.token?.access_token || iamToken;
+function environment() {
   const env = { DB };
   for (const k of ENV_KEYS) if (process.env[k] != null) env[k] = process.env[k];
+  return env;
+}
+async function run(request, env) {
   const jobs = [];
   const ctx = { waitUntil: (p) => jobs.push(p) };
-  const response = await worker_default.fetch(toRequest(event, env.SERVICE_ORIGIN || "https://localhost"), env, ctx);
+  const response = await worker_default.fetch(request, env, ctx);
   await Promise.allSettled(jobs);
+  return response;
+}
+async function publish(env, store) {
+  const data = await (await run(new Request((env.SERVICE_ORIGIN || "https://localhost") + "/api/reviews"), env)).json();
+  if (!Array.isArray(data.reviews)) throw new Error("reviews export failed");
+  await store.put("public/reviews.json", JSON.stringify({ reviews: data.reviews, updated_at: (/* @__PURE__ */ new Date()).toISOString() }), "application/json; charset=utf-8", "public, max-age=30");
+  if (env.S3_KEY_ID && env.S3_KEY_SECRET) await store.put("public/upload.json", JSON.stringify(uploadPolicy(env)), "application/json; charset=utf-8", "no-cache");
+}
+async function ingest(env, store, key2) {
+  if (!/^inbox\/[a-zA-Z0-9-]{16,64}\.json$/.test(key2)) {
+    await store.del(key2);
+    return "skipped";
+  }
+  const text = await store.get(key2);
+  const response = await run(new Request((env.SERVICE_ORIGIN || "https://localhost") + "/api/reviews", {
+    method: "POST",
+    body: text,
+    headers: { "Origin": "https://care-at-your-pace.com", "Content-Type": "text/plain;charset=UTF-8", "Content-Length": String(Buffer.byteLength(text)), "CF-Connecting-IP": "upload:" + key2 }
+  }), env);
+  if (response.status >= 500) throw new Error("ingest " + response.status);
+  await store.del(key2);
+  return response.status;
+}
+async function onMessages(messages, env) {
+  if (!env.BUCKET) return { statusCode: 200, body: "no bucket" };
+  const store = bucket(env, iamToken);
+  const keys = /* @__PURE__ */ new Set();
+  let timer = false;
+  for (const m of messages) {
+    const type = m?.event_metadata?.event_type || "";
+    if (type.includes("ObjectCreate") && m.details?.object_id) keys.add(m.details.object_id);
+    if (type.includes("Timer")) timer = true;
+  }
+  if (timer) for (const k of await store.list("inbox/")) keys.add(k);
+  for (const k of keys) {
+    try {
+      console.log("inbox", k, await ingest(env, store, k));
+    } catch (e) {
+      console.error("inbox failed", k, String(e?.message || e).slice(0, 300));
+    }
+  }
+  if (timer) await publish(env, store);
+  return { statusCode: 200, body: "ok" };
+}
+async function handler(event, context) {
+  iamToken = context?.token?.access_token || iamToken;
+  const env = environment();
+  if (Array.isArray(event?.messages)) return onMessages(event.messages, env);
+  const request = toRequest(event, env.SERVICE_ORIGIN || "https://localhost");
+  const moderation = request.method === "POST" && /^\/api\/moderate\//.test(new URL(request.url).pathname);
+  const response = await run(request, env);
+  if (moderation && response.ok && env.BUCKET) await publish(env, bucket(env, iamToken)).catch((e) => console.error("publish failed", String(e?.message || e).slice(0, 300)));
   return respond(response);
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   handler,
+  ingest,
+  publish,
   respond,
+  run,
   toRequest
 });
